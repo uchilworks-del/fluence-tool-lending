@@ -1,0 +1,39 @@
+{
+  "name": "tool-loan-request-notification",
+  "nodes": [
+    {
+      "parameters": { "path": "tool-loan", "responseMode": "lastNode", "options": {} },
+      "id": "wh1", "name": "Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2,
+      "position": [0, 300], "webhookId": "tool-loan"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify x-signature = HMAC-SHA256(secret, rawBody).\nconst crypto = require('crypto');\nconst secret = $env.N8N_WEBHOOK_SECRET;\nconst body = $json.body ? JSON.stringify($json.body) : '';\nconst sig = ($request.headers['x-signature'] || '');\nconst expected = crypto.createHmac('sha256', secret).update(body).digest('hex');\nconst ok = sig.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));\nif (!ok) throw new Error('invalid signature');\nconst p = $json.body;\nreturn [{ json: { type: p.type, loanId: p.loanId, borrowerId: p.borrowerId, lenderId: p.lenderId, status: p.status, recipient: p.type === 'request_created' ? p.lenderId : p.borrowerId } }];"
+      },
+      "id": "code1", "name": "Verify HMAC + route", "type": "n8n-nodes-base.code", "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the notification. In prod this maps recipient -> email via a\n// directory lookup; the take-home mails a mock inbox (Mailpit, see compose).\nconst { recipient, type, loanId, status } = $json;\nconst subjects = { request_created: 'New borrow request', approved: 'Request approved', declined: 'Request declined', returned: 'Tool returned' };\nreturn [{ json: { to: `${recipient}@demo.local`, subject: `${subjects[type] || 'Loan update'} — ${loanId}`, text: `Loan ${loanId}: ${type} (status ${status})` } }];"
+      },
+      "id": "code2", "name": "Build message", "type": "n8n-nodes-base.code", "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "tool-lending@local", "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}", "text": "={{ $json.text }}",
+        "options": {}
+      },
+      "id": "mail1", "name": "Send notification", "type": "n8n-nodes-base.emailSend", "typeVersion": 2.1,
+      "position": [660, 300],
+      "credentials": { "smtp": { "id": "mailpit", "name": "Mailpit SMTP" } }
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Verify HMAC + route", "type": "main", "index": 0 }]] },
+    "Verify HMAC + route": { "main": [[{ "node": "Build message", "type": "main", "index": 0 }]] },
+    "Build message": { "main": [[{ "node": "Send notification", "type": "main", "index": 0 }]] }
+  }
+}

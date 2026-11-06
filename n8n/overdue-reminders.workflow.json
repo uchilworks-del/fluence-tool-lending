@@ -1,0 +1,87 @@
+{
+  "name": "tool-loan-overdue-reminders",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "days", "triggerAtHour": 9 }] } },
+      "id": "sch1", "name": "Daily 9am", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sign the query string the same way Convex verifies GETs.\nconst crypto = require('crypto');\nconst qs = '';\nconst sig = crypto.createHmac('sha256', $env.N8N_WEBHOOK_SECRET).update(qs).digest('hex');\nreturn [{ json: { sig } }];"
+      },
+      "id": "code0", "name": "Sign request", "type": "n8n-nodes-base.code", "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.CONVEX_SITE_URL }}/overdue",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-signature", "value": "={{ $json.sig }}" }] },
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      },
+      "id": "http1", "name": "Fetch overdue loans", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [400, 300]
+    },
+    {
+      "parameters": { "fieldToSplitOut": "loans" },
+      "id": "split1", "name": "Each loan", "type": "n8n-nodes-base.splitOut", "typeVersion": 1,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "tool-lending@local",
+        "toEmail": "={{ $json.borrowerId }}@demo.local",
+        "subject": "=Reminder: tool loan {{ $json.loanId }} is overdue",
+        "text": "=Your loan ended on {{ $json.endDate }} — please return the tool.",
+        "options": {}
+      },
+      "id": "mail1", "name": "Send reminder", "type": "n8n-nodes-base.emailSend", "typeVersion": 2.1,
+      "position": [800, 300],
+      "credentials": { "smtp": { "id": "mailpit", "name": "Mailpit SMTP" } },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Idempotent write-back: key = n8n execution id + loan id.\nconst crypto = require('crypto');\nconst body = JSON.stringify({ loanId: $json.loanId, executionId: $execution.id });\nconst sig = crypto.createHmac('sha256', $env.N8N_WEBHOOK_SECRET).update(body).digest('hex');\nreturn [{ json: { body, sig } }];"
+      },
+      "id": "code1", "name": "Sign write-back", "type": "n8n-nodes-base.code", "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONVEX_SITE_URL }}/reminders",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-signature", "value": "={{ $json.sig }}" }, { "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "raw",
+        "rawBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "http2", "name": "Write back reminder", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+      "position": [1200, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {},
+      "id": "err1", "name": "Error Trigger", "type": "n8n-nodes-base.errorTrigger", "typeVersion": 1,
+      "position": [400, 600]
+    },
+    {
+      "parameters": { "jsCode": "// Failed runs surface here — never silent. Extend to alert (Slack/email).\nconsole.log('workflow failed', $json);\nreturn [$json];" },
+      "id": "err2", "name": "Log failure", "type": "n8n-nodes-base.code", "typeVersion": 2,
+      "position": [600, 600]
+    }
+  ],
+  "connections": {
+    "Daily 9am": { "main": [[{ "node": "Sign request", "type": "main", "index": 0 }]] },
+    "Sign request": { "main": [[{ "node": "Fetch overdue loans", "type": "main", "index": 0 }]] },
+    "Fetch overdue loans": { "main": [[{ "node": "Each loan", "type": "main", "index": 0 }]] },
+    "Each loan": { "main": [[{ "node": "Send reminder", "type": "main", "index": 0 }]] },
+    "Send reminder": { "main": [[{ "node": "Sign write-back", "type": "main", "index": 0 }]] },
+    "Sign write-back": { "main": [[{ "node": "Write back reminder", "type": "main", "index": 0 }]] },
+    "Error Trigger": { "main": [[{ "node": "Log failure", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "errorWorkflow": "self" }
+}

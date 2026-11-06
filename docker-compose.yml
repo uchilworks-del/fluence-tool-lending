@@ -1,0 +1,16 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    ports: ["5678:5678"]
+    environment:
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
+      - CONVEX_SITE_URL=${CONVEX_SITE_URL}
+      # allow `require('crypto')` inside Code nodes for HMAC signing
+      - NODE_FUNCTION_ALLOW_BUILTIN=crypto
+    volumes:
+      - n8n_data:/home/node/.n8n
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["8025:8025", "1025:1025"]
+volumes:
+  n8n_data:
